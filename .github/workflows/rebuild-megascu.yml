@@ -1,0 +1,182 @@
+name: Rebuild MegaSCU BIN
+
+on:
+  workflow_dispatch:
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show source files
+        run: |
+          echo "=== Repository files ==="
+          find . -maxdepth 2 -type f | sort
+
+      - name: Rebuild OBJ1 BIN
+        shell: python
+        run: |
+          from pathlib import Path
+          import hashlib
+          import re
+
+          root = Path(".")
+
+          # 优先使用完整 HEX
+          full_hex = root / "megascu_obj1_final.hex"
+
+          if full_hex.exists():
+              print(f"Using {full_hex}")
+              text = full_hex.read_text(errors="ignore")
+          else:
+              # 如果仓库中只有 obj1_*.txt 分片，则按文件名排序拼接
+              parts = sorted(root.glob("obj1_*.txt"))
+
+              if not parts:
+                  raise SystemExit(
+                      "ERROR: Cannot find megascu_obj1_final.hex "
+                      "or obj1_*.txt"
+                  )
+
+              print("Using split files:")
+              for p in parts:
+                  print(" ", p)
+
+              text = "".join(
+                  p.read_text(errors="ignore")
+                  for p in parts
+              )
+
+          # 去掉所有空白字符
+          h = re.sub(r"\s+", "", text)
+
+          if len(h) % 2:
+              raise SystemExit(
+                  f"ERROR: HEX character count is odd: {len(h)}"
+              )
+
+          # 严格检查 HEX
+          if not re.fullmatch(r"[0-9a-fA-F]+", h):
+              raise SystemExit(
+                  "ERROR: Source contains non-HEX characters"
+              )
+
+          data = bytes.fromhex(h)
+
+          out = root / "megascu_obj1_final.bin"
+          out.write_bytes(data)
+
+          sha = hashlib.sha256(data).hexdigest()
+
+          print()
+          print("=== OBJ1 RESULT ===")
+          print(f"Bytes : {len(data)}")
+          print(f"Size  : 0x{len(data):X}")
+          print(f"SHA256: {sha}")
+
+          expected_size = 0xCB390
+          expected_sha = (
+              "674367642ff882ca48782d31012e70a2058e33b04cae39874f83e90e6cbbaa68"
+          )
+
+          if len(data) != expected_size:
+              raise SystemExit(
+                  f"ERROR: Expected {expected_size} bytes, "
+                  f"got {len(data)}"
+              )
+
+          if sha != expected_sha:
+              raise SystemExit(
+                  "ERROR: SHA256 mismatch!\n"
+                  f"Expected: {expected_sha}\n"
+                  f"Actual:   {sha}"
+              )
+
+          print("VERIFICATION: PASS")
+
+      - name: Rebuild OBJ2 BIN if HEX exists
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          import hashlib
+
+          root = Path(".")
+          src = root / "megascu_obj2_final.hex"
+
+          if not src.exists():
+              print("OBJ2 HEX not found; skipping.")
+              raise SystemExit(0)
+
+          text = src.read_text(errors="ignore")
+          h = re.sub(r"\s+", "", text)
+
+          if len(h) % 2:
+              raise SystemExit("OBJ2 HEX length is odd")
+
+          if not re.fullmatch(r"[0-9a-fA-F]+", h):
+              raise SystemExit("OBJ2 contains non-HEX characters")
+
+          data = bytes.fromhex(h)
+
+          out = root / "megascu_obj2_final.bin"
+          out.write_bytes(data)
+
+          print(f"OBJ2 bytes : {len(data)}")
+          print(f"OBJ2 size  : 0x{len(data):X}")
+          print(f"OBJ2 SHA256: {hashlib.sha256(data).hexdigest()}")
+
+      - name: Rebuild fixups BIN if HEX exists
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          import hashlib
+
+          root = Path(".")
+          src = root / "megascu_fixups_final.hex"
+
+          if not src.exists():
+              print("Fixup HEX not found; skipping.")
+              raise SystemExit(0)
+
+          text = src.read_text(errors="ignore")
+          h = re.sub(r"\s+", "", text)
+
+          if len(h) % 2:
+              raise SystemExit("Fixup HEX length is odd")
+
+          if not re.fullmatch(r"[0-9a-fA-F]+", h):
+              raise SystemExit("Fixup contains non-HEX characters")
+
+          data = bytes.fromhex(h)
+
+          out = root / "megascu_fixups_final.bin"
+          out.write_bytes(data)
+
+          print(f"Fixup bytes : {len(data)}")
+          print(f"Fixup size  : 0x{len(data):X}")
+          print(f"Fixup SHA256: {hashlib.sha256(data).hexdigest()}")
+
+      - name: Create ZIP
+        run: |
+          zip -9 megascu_rebuilt_bins.zip \
+            megascu_obj1_final.bin \
+            megascu_obj2_final.bin \
+            megascu_fixups_final.bin \
+            2>/dev/null || true
+
+      - name: Upload rebuilt BINs
+        uses: actions/upload-artifact@v4
+        with:
+          name: megascu-rebuilt-bins
+          path: |
+            megascu_obj1_final.bin
+            megascu_obj2_final.bin
+            megascu_fixups_final.bin
+            megascu_rebuilt_bins.zip
+          if-no-files-found: error
+          retention-days: 30
