@@ -1,4 +1,4 @@
-name: Rebuild MegaSCU BIN
+name: Rebuild MegaSCU BIN and Scan Serial XREFs
 
 on:
   workflow_dispatch:
@@ -8,13 +8,36 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      # ============================================================
+      # 1. Checkout
+      # ============================================================
+
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # ============================================================
+      # 2. Show repository files
+      # ============================================================
 
       - name: Show source files
         run: |
           echo "=== Repository files ==="
-          find . -maxdepth 2 -type f | sort
+          find . -maxdepth 3 -type f | sort
+
+      # ============================================================
+      # 3. Rebuild OBJ1 BIN
+      #
+      # Priority:
+      #   megascu_obj1_final.hex
+      #
+      # Otherwise:
+      #   obj1_*.txt
+      #
+      # OBJ1 expected:
+      #   size   = 0xCB390
+      #   SHA256 = 674367...
+      # ============================================================
 
       - name: Rebuild OBJ1 BIN
         shell: python
@@ -25,41 +48,57 @@ jobs:
 
           root = Path(".")
 
-          # 优先使用完整 HEX
           full_hex = root / "megascu_obj1_final.hex"
 
           if full_hex.exists():
-              print(f"Using {full_hex}")
-              text = full_hex.read_text(errors="ignore")
+
+              print(f"Using complete HEX: {full_hex}")
+
+              text = full_hex.read_text(
+                  encoding="utf-8",
+                  errors="ignore"
+              )
+
           else:
-              # 如果仓库中只有 obj1_*.txt 分片，则按文件名排序拼接
-              parts = sorted(root.glob("obj1_*.txt"))
+
+              parts = sorted(
+                  root.glob("obj1_*.txt")
+              )
 
               if not parts:
                   raise SystemExit(
-                      "ERROR: Cannot find megascu_obj1_final.hex "
+                      "ERROR: Cannot find "
+                      "megascu_obj1_final.hex "
                       "or obj1_*.txt"
                   )
 
-              print("Using split files:")
+              print("Using OBJ1 split TXT files:")
+
               for p in parts:
-                  print(" ", p)
+                  print(f"  {p}")
 
               text = "".join(
-                  p.read_text(errors="ignore")
+                  p.read_text(
+                      encoding="utf-8",
+                      errors="ignore"
+                  )
                   for p in parts
               )
 
-          # 去掉所有空白字符
+          # Remove whitespace
           h = re.sub(r"\s+", "", text)
+
+          print(f"HEX characters: {len(h)}")
 
           if len(h) % 2:
               raise SystemExit(
                   f"ERROR: HEX character count is odd: {len(h)}"
               )
 
-          # 严格检查 HEX
-          if not re.fullmatch(r"[0-9a-fA-F]+", h):
+          if not re.fullmatch(
+              r"[0-9a-fA-F]+",
+              h
+          ):
               raise SystemExit(
                   "ERROR: Source contains non-HEX characters"
               )
@@ -67,6 +106,7 @@ jobs:
           data = bytes.fromhex(h)
 
           out = root / "megascu_obj1_final.bin"
+
           out.write_bytes(data)
 
           sha = hashlib.sha256(data).hexdigest()
@@ -78,96 +118,261 @@ jobs:
           print(f"SHA256: {sha}")
 
           expected_size = 0xCB390
+
           expected_sha = (
               "674367642ff882ca48782d31012e70a2058e33b04cae39874f83e90e6cbbaa68"
           )
 
           if len(data) != expected_size:
+
               raise SystemExit(
-                  f"ERROR: Expected {expected_size} bytes, "
-                  f"got {len(data)}"
+                  f"ERROR: Expected {expected_size} bytes "
+                  f"(0x{expected_size:X}), "
+                  f"got {len(data)} bytes "
+                  f"(0x{len(data):X})"
               )
 
           if sha != expected_sha:
+
               raise SystemExit(
                   "ERROR: SHA256 mismatch!\n"
                   f"Expected: {expected_sha}\n"
                   f"Actual:   {sha}"
               )
 
-          print("VERIFICATION: PASS")
+          print()
+          print("OBJ1 VERIFICATION: PASS")
 
-      - name: Rebuild OBJ2 BIN if HEX exists
+      # ============================================================
+      # 4. Rebuild OBJ2 BIN
+      #
+      # Priority:
+      #   megascu_obj2_final.hex
+      #
+      # Otherwise:
+      #   obj2_*.txt
+      # ============================================================
+
+      - name: Rebuild OBJ2 BIN
         shell: python
         run: |
           from pathlib import Path
-          import re
           import hashlib
+          import re
 
           root = Path(".")
-          src = root / "megascu_obj2_final.hex"
 
-          if not src.exists():
-              print("OBJ2 HEX not found; skipping.")
-              raise SystemExit(0)
+          full_hex = root / "megascu_obj2_final.hex"
 
-          text = src.read_text(errors="ignore")
+          if full_hex.exists():
+
+              print(
+                  f"Using complete OBJ2 HEX: {full_hex}"
+              )
+
+              text = full_hex.read_text(
+                  encoding="utf-8",
+                  errors="ignore"
+              )
+
+          else:
+
+              parts = sorted(
+                  root.glob("obj2_*.txt")
+              )
+
+              if not parts:
+
+                  print(
+                      "OBJ2 HEX/TXT not found; skipping."
+                  )
+
+                  raise SystemExit(0)
+
+              print(
+                  "Using OBJ2 split TXT files:"
+              )
+
+              for p in parts:
+                  print(f"  {p}")
+
+              text = "".join(
+                  p.read_text(
+                      encoding="utf-8",
+                      errors="ignore"
+                  )
+                  for p in parts
+              )
+
           h = re.sub(r"\s+", "", text)
 
-          if len(h) % 2:
-              raise SystemExit("OBJ2 HEX length is odd")
+          print(
+              f"OBJ2 HEX characters: {len(h)}"
+          )
 
-          if not re.fullmatch(r"[0-9a-fA-F]+", h):
-              raise SystemExit("OBJ2 contains non-HEX characters")
+          if len(h) % 2:
+              raise SystemExit(
+                  "ERROR: OBJ2 HEX length is odd"
+              )
+
+          if not re.fullmatch(
+              r"[0-9a-fA-F]+",
+              h
+          ):
+              raise SystemExit(
+                  "ERROR: OBJ2 contains "
+                  "non-HEX characters"
+              )
 
           data = bytes.fromhex(h)
 
           out = root / "megascu_obj2_final.bin"
+
           out.write_bytes(data)
 
-          print(f"OBJ2 bytes : {len(data)}")
-          print(f"OBJ2 size  : 0x{len(data):X}")
-          print(f"OBJ2 SHA256: {hashlib.sha256(data).hexdigest()}")
+          sha = hashlib.sha256(data).hexdigest()
 
-      - name: Rebuild fixups BIN if HEX exists
+          print()
+          print("=== OBJ2 RESULT ===")
+          print(f"Bytes : {len(data)}")
+          print(f"Size  : 0x{len(data):X}")
+          print(f"SHA256: {sha}")
+
+      # ============================================================
+      # 5. Rebuild FIXUPS BIN
+      #
+      # Priority:
+      #   megascu_fixups_final.hex
+      #
+      # Otherwise:
+      #   fixup_*.txt
+      # ============================================================
+
+      - name: Rebuild fixups BIN
         shell: python
         run: |
           from pathlib import Path
-          import re
           import hashlib
+          import re
 
           root = Path(".")
-          src = root / "megascu_fixups_final.hex"
 
-          if not src.exists():
-              print("Fixup HEX not found; skipping.")
-              raise SystemExit(0)
+          full_hex = root / "megascu_fixups_final.hex"
 
-          text = src.read_text(errors="ignore")
+          if full_hex.exists():
+
+              print(
+                  f"Using complete FIXUP HEX: {full_hex}"
+              )
+
+              text = full_hex.read_text(
+                  encoding="utf-8",
+                  errors="ignore"
+              )
+
+          else:
+
+              parts = sorted(
+                  root.glob("fixup_*.txt")
+              )
+
+              if not parts:
+
+                  print(
+                      "Fixup HEX/TXT not found; skipping."
+                  )
+
+                  raise SystemExit(0)
+
+              print(
+                  "Using fixup split TXT files:"
+              )
+
+              for p in parts:
+                  print(f"  {p}")
+
+              text = "".join(
+                  p.read_text(
+                      encoding="utf-8",
+                      errors="ignore"
+                  )
+                  for p in parts
+              )
+
           h = re.sub(r"\s+", "", text)
 
-          if len(h) % 2:
-              raise SystemExit("Fixup HEX length is odd")
+          print(
+              f"FIXUP HEX characters: {len(h)}"
+          )
 
-          if not re.fullmatch(r"[0-9a-fA-F]+", h):
-              raise SystemExit("Fixup contains non-HEX characters")
+          if len(h) % 2:
+              raise SystemExit(
+                  "ERROR: Fixup HEX length is odd"
+              )
+
+          if not re.fullmatch(
+              r"[0-9a-fA-F]+",
+              h
+          ):
+              raise SystemExit(
+                  "ERROR: Fixup contains "
+                  "non-HEX characters"
+              )
 
           data = bytes.fromhex(h)
 
           out = root / "megascu_fixups_final.bin"
+
           out.write_bytes(data)
 
-          print(f"Fixup bytes : {len(data)}")
-          print(f"Fixup size  : 0x{len(data):X}")
-          print(f"Fixup SHA256: {hashlib.sha256(data).hexdigest()}")
+          sha = hashlib.sha256(data).hexdigest()
 
-      - name: Create ZIP
+          print()
+          print("=== FIXUP RESULT ===")
+          print(f"Bytes : {len(data)}")
+          print(f"Size  : 0x{len(data):X}")
+          print(f"SHA256: {sha}")
+
+      # ============================================================
+      # 6. Create ZIP
+      # ============================================================
+
+      - name: Create rebuilt BIN ZIP
         run: |
-          zip -9 megascu_rebuilt_bins.zip \
-            megascu_obj1_final.bin \
-            megascu_obj2_final.bin \
-            megascu_fixups_final.bin \
-            2>/dev/null || true
+          rm -f megascu_rebuilt_bins.zip
+
+          FILES=""
+
+          if [ -f megascu_obj1_final.bin ]; then
+            FILES="$FILES megascu_obj1_final.bin"
+          fi
+
+          if [ -f megascu_obj2_final.bin ]; then
+            FILES="$FILES megascu_obj2_final.bin"
+          fi
+
+          if [ -f megascu_fixups_final.bin ]; then
+            FILES="$FILES megascu_fixups_final.bin"
+          fi
+
+          echo "Files to ZIP:"
+          echo "$FILES"
+
+          if [ -z "$FILES" ]; then
+            echo "ERROR: No BIN files found"
+            exit 1
+          fi
+
+          zip -9 megascu_rebuilt_bins.zip $FILES
+
+          echo
+          echo "=== ZIP ==="
+          ls -lh megascu_rebuilt_bins.zip
+
+      # ============================================================
+      # 7. Verification report
+      # ============================================================
+
       - name: Write verification report
         shell: python
         run: |
@@ -178,38 +383,898 @@ jobs:
               "megascu_obj1_final.bin",
               "megascu_obj2_final.bin",
               "megascu_fixups_final.bin",
+              "megascu_rebuilt_bins.zip",
           ]
 
           lines = []
 
+          lines.append(
+              "MegaSCU BIN Rebuild Verification"
+          )
+
+          lines.append(
+              "=" * 60
+          )
+
           for name in files:
+
               p = Path(name)
 
               if not p.exists():
-                  lines.append(f"{name}=NOT_FOUND")
+
+                  lines.append(
+                      f"{name}=NOT_FOUND"
+                  )
+
                   continue
 
               data = p.read_bytes()
 
-              lines.append(f"{name}")
-              lines.append(f"SIZE={len(data)}")
-              lines.append(
-                  f"SHA256={hashlib.sha256(data).hexdigest()}"
-              )
               lines.append("")
+              lines.append(name)
+              lines.append(
+                  f"SIZE={len(data)}"
+              )
+              lines.append(
+                  f"SIZE_HEX=0x{len(data):X}"
+              )
+              lines.append(
+                  "SHA256="
+                  + hashlib.sha256(data).hexdigest()
+              )
 
-          Path("megascu_rebuild_result.txt").write_text(
+          Path(
+              "megascu_rebuild_result.txt"
+          ).write_text(
+              "\n".join(lines),
+              encoding="utf-8"
+          )
+
+          print(
               "\n".join(lines)
           )
 
-          print("\n".join(lines))
+      # ============================================================
+      # 8. Serial XREF scan
+      #
+      # This is the important new step.
+      # ============================================================
+
+      - name: Scan MegaSCU Serial XREFs
+        shell: python
+        run: |
+          from pathlib import Path
+          import struct
+          import hashlib
+
+          binfile = Path(
+              "megascu_obj1_final.bin"
+          )
+
+          if not binfile.exists():
+              raise SystemExit(
+                  "ERROR: OBJ1 BIN does not exist"
+              )
+
+          data = binfile.read_bytes()
+
+          size = len(data)
+
+          report = Path(
+              "megascu_serial_xref.txt"
+          )
+
+          lines = []
+
+          # --------------------------------------------------------
+          # Helper functions
+          # --------------------------------------------------------
+
+          def hx(x):
+              return f"0x{x:05X}"
+
+          def add(title):
+
+              lines.append("")
+              lines.append(
+                  "=" * 80
+              )
+              lines.append(title)
+              lines.append(
+                  "=" * 80
+              )
+
+          def context(pos, before=24, after=48):
+
+              a = max(
+                  0,
+                  pos - before
+              )
+
+              b = min(
+                  size,
+                  pos + after
+              )
+
+              chunk = data[a:b]
+
+              lines.append(
+                  f"OFFSET {hx(pos)}"
+              )
+
+              lines.append(
+                  f"RANGE  {hx(a)} - {hx(b)}"
+              )
+
+              lines.append(
+                  "HEX:"
+              )
+
+              lines.append(
+                  " ".join(
+                      f"{x:02X}"
+                      for x in chunk
+                  )
+              )
+
+          def find_bytes(pattern):
+
+              hits = []
+
+              start = 0
+
+              while True:
+
+                  p = data.find(
+                      pattern,
+                      start
+                  )
+
+                  if p < 0:
+                      break
+
+                  hits.append(p)
+
+                  start = p + 1
+
+              return hits
+
+          # --------------------------------------------------------
+          # Header
+          # --------------------------------------------------------
+
+          lines.append(
+              "MegaSCU OBJ1 Serial Reverse Engineering Scan"
+          )
+
+          lines.append(
+              "=" * 80
+          )
+
+          lines.append(
+              f"FILE   = {binfile}"
+          )
+
+          lines.append(
+              f"SIZE   = {size} bytes"
+          )
+
+          lines.append(
+              f"SIZE   = 0x{size:X}"
+          )
+
+          lines.append(
+              "SHA256 = "
+              + hashlib.sha256(
+                  data
+              ).hexdigest()
+          )
+
+          # --------------------------------------------------------
+          # 1. DWORD references
+          # --------------------------------------------------------
+
+          targets = {
+
+              0x31100:
+                  "PROPERTY_PRODUCT_NAME",
+
+              0x31101:
+                  "PROPERTY_SERIAL_NO",
+
+              0x31102:
+                  "PROPERTY_FW_PACKAGE",
+
+              0x31103:
+                  "PROPERTY_CONTROLLER_ID",
+
+              0x31104:
+                  "PROPERTY_VENDOR_ID",
+
+              0x31105:
+                  "PROPERTY_SUBDEVICE_ID",
+
+              0x31107:
+                  "PROPERTY_DEVICE_ID",
+
+              0x31108:
+                  "PROPERTY_SUBVENDOR_ID",
+
+              0x31109:
+                  "PROPERTY_HOST_INTERFACE",
+
+              0x548:
+                  "OBJECT_SERIAL_OFFSET_548",
+
+              0x598:
+                  "OBJECT_FIELD_OFFSET_598",
+
+              0x648:
+                  "OBJECT_FW_PACKAGE_OFFSET_648",
+          }
+
+          add(
+              "1. LITTLE-ENDIAN DWORD REFERENCES"
+          )
+
+          for value, name in targets.items():
+
+              pattern = struct.pack(
+                  "<I",
+                  value
+              )
+
+              hits = find_bytes(
+                  pattern
+              )
+
+              lines.append("")
+              lines.append(
+                  f"{name}"
+              )
+
+              lines.append(
+                  f"VALUE = {hx(value)}"
+              )
+
+              lines.append(
+                  f"HITS  = {len(hits)}"
+              )
+
+              for p in hits:
+
+                  lines.append(
+                      f"  {hx(p)}"
+                  )
+
+                  context(
+                      p,
+                      8,
+                      32
+                  )
+
+          # --------------------------------------------------------
+          # 2. Direct CALL rel32 XREF
+          # --------------------------------------------------------
+
+          call_targets = {
+
+              0x5D013:
+                  "5D013",
+
+              0x5D174:
+                  "5D174",
+
+              0x67B80:
+                  "67B80",
+
+              0x67E30:
+                  "67E30",
+
+              0x8DBE4:
+                  "8DBE4",
+
+              0x8DC00:
+                  "8DC00",
+
+              0x95A26:
+                  "95A26",
+
+              0x95A34:
+                  "95A34",
+
+              0x957E6:
+                  "957E6",
+
+              0x95820:
+                  "95820",
+
+              0x95868:
+                  "95868",
+
+              0x958A3:
+                  "958A3",
+
+              0x958E1:
+                  "958E1",
+
+              0x95924:
+                  "95924",
+
+              0x9595A:
+                  "9595A",
+
+              0x95B5B:
+                  "95B5B",
+
+              0x964F6:
+                  "964F6",
+
+              0x97EE6:
+                  "97EE6",
+
+              0x9810E:
+                  "9810E",
+
+              0x9855A:
+                  "9855A",
+
+              0xB5DF5:
+                  "B5DF5",
+
+              0xB5E1E:
+                  "B5E1E",
+
+              0xB5ED5:
+                  "B5ED5",
+
+              0xB5F8E:
+                  "B5F8E",
+
+              0xB9F63:
+                  "B9F63",
+
+              0xBA870:
+                  "BA870",
+
+              0xBB650:
+                  "BB650",
+
+              0xBC830:
+                  "BC830",
+          }
+
+          add(
+              "2. DIRECT CALL XREFS"
+          )
+
+          for target, name in call_targets.items():
+
+              hits = []
+
+              for p in range(
+                  0,
+                  max(0, size - 5)
+              ):
+
+                  if data[p] != 0xE8:
+                      continue
+
+                  rel = struct.unpack_from(
+                      "<i",
+                      data,
+                      p + 1
+                  )[0]
+
+                  dest = (
+                      p
+                      + 5
+                      + rel
+                  )
+
+                  if dest == target:
+
+                      hits.append(
+                          p
+                      )
+
+              lines.append("")
+              lines.append(
+                  f"TARGET {name} "
+                  f"({hx(target)})"
+              )
+
+              lines.append(
+                  f"CALLERS = {len(hits)}"
+              )
+
+              for p in hits:
+
+                  rel = struct.unpack_from(
+                      "<i",
+                      data,
+                      p + 1
+                  )[0]
+
+                  dest = (
+                      p
+                      + 5
+                      + rel
+                  )
+
+                  lines.append(
+                      f"  caller={hx(p)} "
+                      f"dest={hx(dest)} "
+                      f"rel={rel:+d}"
+                  )
+
+                  context(
+                      p,
+                      32,
+                      64
+                  )
+
+          # --------------------------------------------------------
+          # 3. LEA [base+0x548]
+          #
+          # x86 32-bit:
+          #
+          # 8D /r
+          #
+          # mod=10 means disp32
+          # --------------------------------------------------------
+
+          add(
+              "3. LEA REFERENCES TO OBJECT +0x548"
+          )
+
+          lea_hits = []
+
+          for p in range(
+              0,
+              max(0, size - 8)
+          ):
+
+              if data[p] != 0x8D:
+                  continue
+
+              modrm = data[p + 1]
+
+              mod = (
+                  modrm >> 6
+              ) & 3
+
+              rm = (
+                  modrm & 7
+              )
+
+              if mod != 2:
+                  continue
+
+              if rm == 4:
+
+                  # SIB + disp32
+
+                  if p + 7 > size:
+                      continue
+
+                  disp = struct.unpack_from(
+                      "<i",
+                      data,
+                      p + 3
+                  )[0]
+
+              else:
+
+                  # disp32
+
+                  if p + 6 > size:
+                      continue
+
+                  disp = struct.unpack_from(
+                      "<i",
+                      data,
+                      p + 2
+                  )[0]
+
+              if disp == 0x548:
+
+                  lea_hits.append(
+                      p
+                  )
+
+          lines.append(
+              f"LEA [base+0x548] HITS = "
+              f"{len(lea_hits)}"
+          )
+
+          for p in lea_hits:
+
+              lines.append(
+                  f"  {hx(p)}"
+              )
+
+              context(
+                  p,
+                  32,
+                  64
+              )
+
+          # --------------------------------------------------------
+          # 4. MOV [base+0x548]
+          #
+          # Common instructions:
+          #
+          #   89 /r
+          #   8B /r
+          #   C7 /0
+          # --------------------------------------------------------
+
+          add(
+              "4. MOV REFERENCES TO OBJECT +0x548"
+          )
+
+          mov_hits = []
+
+          for p in range(
+              0,
+              max(0, size - 8)
+          ):
+
+              opcode = data[p]
+
+              if opcode not in (
+                  0x89,
+                  0x8B,
+                  0xC7,
+              ):
+                  continue
+
+              modrm = data[p + 1]
+
+              mod = (
+                  modrm >> 6
+              ) & 3
+
+              rm = (
+                  modrm & 7
+              )
+
+              if mod != 2:
+                  continue
+
+              if rm == 4:
+
+                  if p + 7 > size:
+                      continue
+
+                  disp = struct.unpack_from(
+                      "<i",
+                      data,
+                      p + 3
+                  )[0]
+
+              else:
+
+                  if p + 6 > size:
+                      continue
+
+                  disp = struct.unpack_from(
+                      "<i",
+                      data,
+                      p + 2
+                  )[0]
+
+              if disp == 0x548:
+
+                  mov_hits.append(
+                      p
+                  )
+
+          lines.append(
+              f"MOV [base+0x548] HITS = "
+              f"{len(mov_hits)}"
+          )
+
+          for p in mov_hits:
+
+              lines.append(
+                  f"  {hx(p)}"
+              )
+
+              context(
+                  p,
+                  32,
+                  64
+              )
+
+          # --------------------------------------------------------
+          # 5. Search for immediate 0x548 in common instructions
+          # --------------------------------------------------------
+
+          add(
+              "5. ALL RAW REFERENCES TO DWORD 0x548"
+          )
+
+          raw548 = find_bytes(
+              struct.pack(
+                  "<I",
+                  0x548
+              )
+          )
+
+          lines.append(
+              f"RAW 0x548 HITS = "
+              f"{len(raw548)}"
+          )
+
+          for p in raw548:
+
+              lines.append(
+                  f"  {hx(p)}"
+              )
+
+              context(
+                  p,
+                  16,
+                  40
+              )
+
+          # --------------------------------------------------------
+          # 6. ASCII serial candidates
+          # --------------------------------------------------------
+
+          add(
+              "6. ASCII SERIAL CANDIDATES"
+          )
+
+          ascii_needles = [
+
+              b"FW-SBFATAHRCGDF6",
+
+              b"FW-SB",
+
+              b"FW-",
+
+              b"SBFATAHRCGDF6",
+
+              b"SV54938005",
+          ]
+
+          for needle in ascii_needles:
+
+              hits = find_bytes(
+                  needle
+              )
+
+              lines.append("")
+              lines.append(
+                  f"{needle!r} "
+                  f"HITS = {len(hits)}"
+              )
+
+              for p in hits:
+
+                  lines.append(
+                      f"  {hx(p)}"
+                  )
+
+                  context(
+                      p,
+                      32,
+                      64
+                  )
+
+          # --------------------------------------------------------
+          # 7. Search common string-copy functions
+          #
+          # These are not proof of serial handling.
+          # They are useful candidates around +0x548.
+          # --------------------------------------------------------
+
+          add(
+              "7. KNOWN STRING / BUFFER ROUTINE CALLERS"
+          )
+
+          string_targets = {
+
+              0xBA870:
+                  "BA870",
+
+              0xBB650:
+                  "BB650",
+
+              0xB9F63:
+                  "B9F63",
+          }
+
+          for target, name in string_targets.items():
+
+              hits = []
+
+              for p in range(
+                  0,
+                  max(0, size - 5)
+              ):
+
+                  if data[p] != 0xE8:
+                      continue
+
+                  rel = struct.unpack_from(
+                      "<i",
+                      data,
+                      p + 1
+                  )[0]
+
+                  dest = (
+                      p
+                      + 5
+                      + rel
+                  )
+
+                  if dest == target:
+
+                      hits.append(
+                          p
+                      )
+
+              lines.append("")
+              lines.append(
+                  f"{name} "
+                  f"CALLERS = {len(hits)}"
+              )
+
+              for p in hits:
+
+                  lines.append(
+                      f"  {hx(p)}"
+                  )
+
+          # --------------------------------------------------------
+          # 8. Important known functions
+          # --------------------------------------------------------
+
+          add(
+              "8. CURRENTLY KNOWN SERIAL PATH"
+          )
+
+          lines.append(
+              "AdpAllInfoCp:"
+          )
+
+          lines.append(
+              "  property 0x31101 = Serial No"
+          )
+
+          lines.append(
+              "  Serial field = object + 0x548"
+          )
+
+          lines.append("")
+
+          lines.append(
+              "Known formatter:"
+          )
+
+          lines.append(
+              "  0x5D174 reads object + 0x548"
+          )
+
+          lines.append(
+              "  0x5D174 reads object + 0x598"
+          )
+
+          lines.append(
+              "  0x5D174 reads object + 0x648"
+          )
+
+          lines.append("")
+
+          lines.append(
+              "The important unanswered question:"
+          )
+
+          lines.append(
+              "  WHO WRITES object + 0x548?"
+          )
+
+          # --------------------------------------------------------
+          # 9. Summary
+          # --------------------------------------------------------
+
+          add(
+              "9. SUMMARY"
+          )
+
+          lines.append(
+              "Priority locations for manual follow-up:"
+          )
+
+          lines.append(
+              "1. Any write involving [reg+0x548]"
+          )
+
+          lines.append(
+              "2. Any LEA [reg+0x548] followed by CALL"
+          )
+
+          lines.append(
+              "3. References to property 0x31101"
+          )
+
+          lines.append(
+              "4. Callers of B9F63"
+          )
+
+          lines.append(
+              "5. Callers of BA870"
+          )
+
+          lines.append(
+              "6. Any embedded FW-SB... string"
+          )
+
+          lines.append("")
+
+          lines.append(
+              "IMPORTANT:"
+          )
+
+          lines.append(
+              "This report uses the reconstructed OBJ1 "
+              "flat binary directly."
+          )
+
+          lines.append(
+              "Offsets are OBJ1-relative offsets."
+          )
+
+          # --------------------------------------------------------
+          # Write report
+          # --------------------------------------------------------
+
+          report.write_text(
+              "\n".join(lines),
+              encoding="utf-8"
+          )
+
+          print(
+              f"Report written: {report}"
+          )
+
+          print(
+              f"Report size: "
+              f"{report.stat().st_size} bytes"
+          )
+
+      # ============================================================
+      # 9. Upload verification report
+      # ============================================================
 
       - name: Upload verification report
         uses: actions/upload-artifact@v4
         with:
           name: megascu-verification
           path: megascu_rebuild_result.txt
+          if-no-files-found: error
           retention-days: 30
+
+      # ============================================================
+      # 10. Upload Serial XREF report
+      # ============================================================
+
+      - name: Upload serial XREF report
+        uses: actions/upload-artifact@v4
+        with:
+          name: megascu-serial-xref
+          path: megascu_serial_xref.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      # ============================================================
+      # 11. Upload rebuilt BINs
+      # ============================================================
+
       - name: Upload rebuilt BINs
         uses: actions/upload-artifact@v4
         with:
