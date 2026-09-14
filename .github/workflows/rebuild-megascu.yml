@@ -168,7 +168,48 @@ jobs:
             megascu_obj2_final.bin \
             megascu_fixups_final.bin \
             2>/dev/null || true
+      - name: Write verification report
+        shell: python
+        run: |
+          from pathlib import Path
+          import hashlib
 
+          files = [
+              "megascu_obj1_final.bin",
+              "megascu_obj2_final.bin",
+              "megascu_fixups_final.bin",
+          ]
+
+          lines = []
+
+          for name in files:
+              p = Path(name)
+
+              if not p.exists():
+                  lines.append(f"{name}=NOT_FOUND")
+                  continue
+
+              data = p.read_bytes()
+
+              lines.append(f"{name}")
+              lines.append(f"SIZE={len(data)}")
+              lines.append(
+                  f"SHA256={hashlib.sha256(data).hexdigest()}"
+              )
+              lines.append("")
+
+          Path("megascu_rebuild_result.txt").write_text(
+              "\n".join(lines)
+          )
+
+          print("\n".join(lines))
+
+      - name: Upload verification report
+        uses: actions/upload-artifact@v4
+        with:
+          name: megascu-verification
+          path: megascu_rebuild_result.txt
+          retention-days: 30
       - name: Upload rebuilt BINs
         uses: actions/upload-artifact@v4
         with:
